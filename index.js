@@ -108,19 +108,31 @@ const ticketTypes = {
   },
 };
 
+function getSupportRoleIds() {
+  const raw = process.env.TICKET_SUPPORT_ROLE_IDS || process.env.TICKET_SUPPORT_ROLE_ID || '';
+  return [...new Set(
+    raw
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^\d{17,20}$/.test(id)),
+  )];
+}
+
 function getTicketConfig() {
   return {
     categoryId: process.env.TICKET_CATEGORY_ID,
-    supportRoleId: process.env.TICKET_SUPPORT_ROLE_ID,
+    supportRoleIds: getSupportRoleIds(),
     logChannelId: process.env.TICKET_LOG_CHANNEL_ID,
   };
 }
 
 function missingTicketConfig() {
   const config = getTicketConfig();
-  return Object.entries(config)
-    .filter(([, value]) => !value)
-    .map(([key]) => key);
+  const missing = [];
+  if (!config.categoryId) missing.push('TICKET_CATEGORY_ID');
+  if (config.supportRoleIds.length === 0) missing.push('TICKET_SUPPORT_ROLE_IDS');
+  if (!config.logChannelId) missing.push('TICKET_LOG_CHANNEL_ID');
+  return missing;
 }
 
 function buildTicketPanelEmbed(guild) {
@@ -187,9 +199,9 @@ function isTicketChannel(channel) {
 }
 
 function memberIsTicketStaff(member) {
-  const supportRoleId = process.env.TICKET_SUPPORT_ROLE_ID;
+  const supportRoleIds = getSupportRoleIds();
   return member.permissions.has(PermissionFlagsBits.ManageChannels)
-    || (supportRoleId && member.roles.cache.has(supportRoleId));
+    || supportRoleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
 function safeChannelName(username) {
@@ -235,8 +247,8 @@ async function createTicket(interaction, typeKey, reason) {
           PermissionFlagsBits.EmbedLinks,
         ],
       },
-      {
-        id: config.supportRoleId,
+      ...config.supportRoleIds.map((roleId) => ({
+        id: roleId,
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -245,7 +257,7 @@ async function createTicket(interaction, typeKey, reason) {
           PermissionFlagsBits.EmbedLinks,
           PermissionFlagsBits.ManageMessages,
         ],
-      },
+      })),
       {
         id: interaction.guild.members.me.id,
         allow: [
@@ -275,6 +287,8 @@ async function createTicket(interaction, typeKey, reason) {
       .setStyle(ButtonStyle.Danger),
   );
 
+  const supportMentions = config.supportRoleIds.map((roleId) => `<@&${roleId}>`).join(' ');
+
   const embed = new EmbedBuilder()
     .setColor(process.env.EMBED_COLOR || '#F4B8CC')
     .setAuthor({
@@ -288,7 +302,7 @@ async function createTicket(interaction, typeKey, reason) {
       `**Reason**`,
       reason,
       '',
-      `A member of <@&${config.supportRoleId}> will assist you soon.`,
+      `A member of ${supportMentions} will assist you soon.`,
       '> Please explain everything clearly and avoid repeatedly pinging staff.',
     ].join('\n'))
     .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
@@ -296,10 +310,10 @@ async function createTicket(interaction, typeKey, reason) {
     .setTimestamp();
 
   await channel.send({
-    content: `${interaction.user} <@&${config.supportRoleId}>`,
+    content: `${interaction.user} ${supportMentions}`,
     embeds: [embed],
     components: [controls],
-    allowedMentions: { users: [interaction.user.id], roles: [config.supportRoleId] },
+    allowedMentions: { users: [interaction.user.id], roles: config.supportRoleIds },
   });
 
   await interaction.editReply(`Your ticket has been created: ${channel}`);

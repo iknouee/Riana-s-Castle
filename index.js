@@ -2,13 +2,16 @@ require('dotenv').config();
 
 const path = require('path');
 const express = require('express');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const {
   ActionRowBuilder,
+  ApplicationCommandType,
   AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
   Client,
+  ContextMenuCommandBuilder,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
@@ -58,6 +61,11 @@ const client = new Client({
 });
 
 const bannerPath = path.join(__dirname, 'assets', 'welcome-banner.png');
+const quoteBackgroundPath = path.join(__dirname, 'assets', 'welcome-banner.png');
+
+const makeQuoteCommand = new ContextMenuCommandBuilder()
+  .setName('Make Quote')
+  .setType(ApplicationCommandType.Message);
 
 const testWelcomeCommand = new SlashCommandBuilder()
   .setName('testwelcome')
@@ -97,6 +105,178 @@ const ticketRemoveCommand = new SlashCommandBuilder()
     option.setName('member').setDescription('Member to remove').setRequired(true),
   );
 
+
+
+function cleanQuoteText(message) {
+  const content = (message.cleanContent || message.content || '').trim();
+  if (content) return content;
+
+  if (message.attachments.size > 0) {
+    return '[Attachment]';
+  }
+
+  if (message.embeds.length > 0) {
+    return '[Embed message]';
+  }
+
+  return '[No text content]';
+}
+
+function wrapCanvasText(ctx, text, maxWidth, maxLines = 7) {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ');
+  const lines = [];
+  let current = '';
+
+  for (const word of words) {
+    const attempt = current ? `${current} ${word}` : word;
+    if (ctx.measureText(attempt).width <= maxWidth) {
+      current = attempt;
+      continue;
+    }
+
+    if (current) lines.push(current);
+    current = word;
+
+    if (lines.length >= maxLines) break;
+  }
+
+  if (lines.length < maxLines && current) lines.push(current);
+
+  const usedWords = lines.join(' ').split(' ').length;
+  if (usedWords < words.length && lines.length > 0) {
+    let last = lines[lines.length - 1];
+    while (ctx.measureText(`${last}…`).width > maxWidth && last.length > 1) {
+      last = last.slice(0, -1);
+    }
+    lines[lines.length - 1] = `${last.trimEnd()}…`;
+  }
+
+  return lines;
+}
+
+async function buildQuoteCard(message, guild) {
+  const width = 1200;
+  const height = 675;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  const background = await loadImage(quoteBackgroundPath);
+  const scale = Math.max(width / background.width, height / background.height);
+  const drawWidth = background.width * scale;
+  const drawHeight = background.height * scale;
+  ctx.drawImage(background, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+
+  const gradient = ctx.createLinearGradient(0, 0, width, 0);
+  gradient.addColorStop(0, 'rgba(74, 24, 47, 0.82)');
+  gradient.addColorStop(0.48, 'rgba(90, 37, 62, 0.66)');
+  gradient.addColorStop(1, 'rgba(245, 183, 207, 0.36)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = 'rgba(255, 242, 248, 0.92)';
+  ctx.beginPath();
+  ctx.roundRect(76, 66, 1048, 543, 34);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(228, 126, 169, 0.9)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  const avatar = await loadImage(message.author.displayAvatarURL({ extension: 'png', size: 256 }));
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(220, 220, 96, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(avatar, 124, 124, 192, 192);
+  ctx.restore();
+
+  ctx.strokeStyle = '#F19ABA';
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.arc(220, 220, 101, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = '#8F3F63';
+  ctx.font = '700 42px sans-serif';
+  ctx.fillText(message.member?.displayName || message.author.globalName || message.author.username, 360, 150);
+
+  ctx.fillStyle = '#B86A8E';
+  ctx.font = '30px sans-serif';
+  ctx.fillText(`@${message.author.username}`, 360, 194);
+
+  const quote = cleanQuoteText(message);
+  ctx.fillStyle = '#5C2B42';
+  ctx.font = '600 46px sans-serif';
+  const lines = wrapCanvasText(ctx, `“${quote}”`, 690, 6);
+  let y = 280;
+  for (const line of lines) {
+    ctx.fillText(line, 360, y);
+    y += 61;
+  }
+
+  ctx.fillStyle = '#9E5576';
+  ctx.font = '26px sans-serif';
+  const channelName = message.channel?.name ? `#${message.channel.name}` : 'Riana’s Castle';
+  ctx.fillText(`${channelName}  •  ${new Date(message.createdTimestamp).toLocaleDateString('en-GB')}`, 360, 565);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#A75F80';
+  ctx.font = 'italic 24px sans-serif';
+  ctx.fillText(`Made in ${guild.name} ♡`, 1080, 565);
+  ctx.textAlign = 'left';
+
+  return canvas.toBuffer('image/png');
+}
+
+async function sendQuoteToChannel(interaction) {
+  const quoteChannelId = (process.env.QUOTE_CHANNEL_ID || '').trim();
+  if (!/^\d{17,20}$/.test(quoteChannelId)) {
+    await interaction.reply({
+      content: 'QUOTE_CHANNEL_ID is missing or invalid in Render.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const quoteChannel = await interaction.guild.channels.fetch(quoteChannelId).catch(() => null);
+  if (!quoteChannel?.isTextBased()) {
+    await interaction.editReply('I could not access the configured quote channel.');
+    return;
+  }
+
+  const message = interaction.targetMessage;
+  const image = await buildQuoteCard(message, interaction.guild);
+  const attachmentName = `quote-${message.id}.png`;
+
+  const embed = new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setImage(`attachment://${attachmentName}`)
+    .setFooter({
+      text: `Quoted by ${interaction.user.username}`,
+      iconURL: interaction.user.displayAvatarURL({ size: 128 }),
+    })
+    .setTimestamp();
+
+  const sourceButton = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('View Original Message')
+      .setEmoji('💬')
+      .setStyle(ButtonStyle.Link)
+      .setURL(message.url),
+  );
+
+  await quoteChannel.send({
+    embeds: [embed],
+    files: [new AttachmentBuilder(image, { name: attachmentName })],
+    components: [sourceButton],
+    allowedMentions: { parse: [] },
+  });
+
+  await interaction.editReply(`The quote was sent to ${quoteChannel}. ♡`);
+}
 
 const colorRoleDefinitions = [
   { key: 'red', label: 'Red', emoji: '🔴', env: 'COLOR_ROLE_RED_ID', description: 'A bold royal red crown.' },
@@ -565,6 +745,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   for (const guild of readyClient.guilds.cache.values()) {
     try {
       await guild.commands.set([
+        makeQuoteCommand.toJSON(),
         testWelcomeCommand.toJSON(),
         rulesCommand.toJSON(),
         boostPerksCommand.toJSON(),
@@ -573,7 +754,7 @@ client.once(Events.ClientReady, async (readyClient) => {
         ticketAddCommand.toJSON(),
         ticketRemoveCommand.toJSON(),
       ]);
-      console.log(`Registered welcome, rules, boost perks, colour roles and ticket commands in ${guild.name}.`);
+      console.log(`Registered quote, welcome, rules, boost perks, colour roles and ticket commands in ${guild.name}.`);
     } catch (error) {
       console.error(`Failed to register commands in ${guild.name}:`, error);
     }
@@ -594,6 +775,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       content: 'This command can only be used inside the server.',
       ephemeral: true,
     });
+    return;
+  }
+
+  if (interaction.isMessageContextMenuCommand() && interaction.commandName === 'Make Quote') {
+    try {
+      await sendQuoteToChannel(interaction);
+    } catch (error) {
+      console.error('Failed to create quote:', error);
+      const message = 'I could not create that quote. Check QUOTE_CHANNEL_ID, channel permissions, and the bot logs.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
+    }
     return;
   }
 

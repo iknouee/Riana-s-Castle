@@ -8,6 +8,7 @@ const {
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  PermissionFlagsBits,
   SlashCommandBuilder,
 } = require('discord.js');
 
@@ -29,7 +30,7 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 
 app.get('/', (_req, res) => {
-  res.status(200).send("Riana's Castle welcome bot is online.");
+  res.status(200).send("Riana's Castle bot is online.");
 });
 
 app.get('/health', (_req, res) => {
@@ -51,7 +52,64 @@ const bannerPath = path.join(__dirname, 'assets', 'welcome-banner.png');
 
 const testWelcomeCommand = new SlashCommandBuilder()
   .setName('testwelcome')
-  .setDescription('Preview the Riana\'s Castle welcome message.');
+  .setDescription("Preview the Riana's Castle welcome message.");
+
+const rulesCommand = new SlashCommandBuilder()
+  .setName('rulesembed')
+  .setDescription('Send the Royal Protocol rules embed in this channel.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+function buildRulesEmbed(guild) {
+  const sparkle = '<a:riascastle:1527767518973001941>';
+  const titleEmoji = '<a:riascastle:1527747236988063918>';
+
+  return new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setAuthor({
+      name: "Riana's Castle",
+      iconURL: guild.iconURL({ size: 256 }) || undefined,
+    })
+    .setTitle(`𝐓𝐇𝐄 𝐑𝐎𝐘𝐀𝐋 𝐏𝐑𝐎𝐓𝐎𝐂𝐎𝐋 ${titleEmoji}`)
+    .setDescription(
+      [
+        `***𝟏. 𝐑𝐞𝐬𝐩𝐞𝐜𝐭 𝐭𝐡𝐞 𝐂𝐚𝐬𝐭𝐥𝐞*** ${sparkle}`,
+        '𝘛𝘳𝘦𝘢𝘵 𝘢𝘭𝘭 𝘮𝘦𝘮𝘣𝘦𝘳𝘴 𝘸𝘪𝘵𝘩 𝘬𝘪𝘯𝘥𝘯𝘦𝘴𝘴 𝘢𝘯𝘥 𝘳𝘦𝘴𝘱𝘦𝘤𝘵. 𝘕𝘰 𝘣𝘶𝘭𝘭𝘺𝘪𝘯𝘨, 𝘩𝘢𝘳𝘢𝘴𝘴𝘮𝘦𝘯𝘵, 𝘥𝘪𝘴𝘤𝘳𝘪𝘮𝘪𝘯𝘢𝘵𝘪𝘰𝘯, 𝘰𝘳 𝘶𝘯𝘯𝘦𝘤𝘦𝘴𝘴𝘢𝘳𝘺 𝘥𝘳𝘢𝘮𝘢 𝘸𝘪𝘭𝘭 𝘣𝘦 𝘵𝘰𝘭𝘦𝘳𝘢𝘵𝘦𝘥.',
+        '',
+        `***𝟐. 𝐊𝐞𝐞𝐩 𝐭𝐡𝐞 𝐂𝐚𝐬𝐭𝐥𝐞 𝐒𝐚𝐟𝐞*** ${sparkle}`,
+        '𝘕𝘰 𝘕𝘚𝘍𝘞 𝘤𝘰𝘯𝘵𝘦𝘯𝘵, 𝘪𝘯𝘢𝘱𝘱𝘳𝘰𝘱𝘳𝘪𝘢𝘵𝘦 𝘫𝘰𝘬𝘦𝘴, 𝘰𝘳 𝘢𝘯𝘺𝘵𝘩𝘪𝘯𝘨 𝘵𝘩𝘢𝘵 𝘮𝘢𝘬𝘦𝘴 𝘵𝘩𝘦 𝘬𝘪𝘯𝘨𝘥𝘰𝘮 𝘶𝘯𝘤𝘰𝘮𝘧𝘰𝘳𝘵𝘢𝘣𝘭𝘦.',
+        '',
+        `***𝟑. 𝐅𝐨𝐥𝐥𝐨𝐰 𝐭𝐡𝐞 𝐑𝐨𝐲𝐚𝐥 𝐂𝐨𝐮𝐫𝐭 𝐑𝐮𝐥𝐞𝐬*** ${sparkle}`,
+        '𝘓𝘪𝘴𝘵𝘦𝘯 𝘵𝘰 𝘴𝘵𝘢𝘧𝘧 𝘮𝘦𝘮𝘣𝘦𝘳𝘴 𝘢𝘯𝘥 𝘧𝘰𝘭𝘭𝘰𝘸 𝘵𝘩𝘦𝘪𝘳 𝘥𝘦𝘤𝘪𝘴𝘪𝘰𝘯𝘴. 𝘐𝘧 𝘺𝘰𝘶 𝘩𝘢𝘷𝘦 𝘢𝘯 𝘪𝘴𝘴𝘶𝘦, 𝘰𝘱𝘦𝘯 𝘢 𝘵𝘪𝘤𝘬𝘦𝘵 𝘪𝘯𝘴𝘵𝘦𝘢𝘥 𝘰𝘧 𝘤𝘢𝘶𝘴𝘪𝘯𝘨 𝘤𝘩𝘢𝘰𝘴 𝘪𝘯 𝘵𝘩𝘦 𝘤𝘢𝘴𝘵𝘭𝘦.',
+        '',
+        `***𝟒. 𝐍𝐨 𝐑𝐨𝐲𝐚𝐥 𝐑𝐢𝐯𝐚𝐥𝐫𝐢𝐞𝐬*** ${sparkle}`,
+        '𝘋𝘰 𝘯𝘰𝘵 𝘴𝘵𝘢𝘳𝘵 𝘶𝘯𝘯𝘦𝘤𝘦𝘴𝘴𝘢𝘳𝘺 𝘧𝘪𝘨𝘩𝘵𝘴, 𝘢𝘳𝘨𝘶𝘮𝘦𝘯𝘵𝘴, 𝘰𝘳 𝘴𝘱𝘳𝘦𝘢𝘥 𝘯𝘦𝘨𝘢𝘵𝘪𝘷𝘪𝘵𝘺. 𝘒𝘦𝘦𝘱 𝘵𝘩𝘦 𝘬𝘪𝘯𝘨𝘥𝘰𝘮 𝘱𝘦𝘢𝘤𝘦𝘧𝘶𝘭.',
+        '',
+        `***𝟓. 𝐏𝐫𝐨𝐭𝐞𝐜𝐭 𝐭𝐡𝐞 𝐂𝐚𝐬𝐭𝐥𝐞 𝐖𝐚𝐥𝐥𝐬*** ${sparkle}`,
+        '𝘕𝘰 𝘢𝘥𝘷𝘦𝘳𝘵𝘪𝘴𝘪𝘯𝘨, 𝘴𝘦𝘭𝘧-𝘱𝘳𝘰𝘮𝘰𝘵𝘪𝘰𝘯, 𝘰𝘳 𝘴𝘩𝘢𝘳𝘪𝘯𝘨 𝘪𝘯𝘷𝘪𝘵𝘦𝘴 𝘵𝘰 𝘰𝘵𝘩𝘦𝘳 𝘴𝘦𝘳𝘷𝘦𝘳𝘴 𝘸𝘪𝘵𝘩𝘰𝘶𝘵 𝘴𝘵𝘢𝘧𝘧 𝘱𝘦𝘳𝘮𝘪𝘴𝘴𝘪𝘰𝘯.',
+        '',
+        `***𝟔. 𝐔𝐬𝐞 𝐭𝐡𝐞 𝐏𝐫𝐨𝐩𝐞𝐫 𝐂𝐡𝐚𝐦𝐛𝐞𝐫𝐬*** ${sparkle}`,
+        '𝘒𝘦𝘦𝘱 𝘤𝘰𝘯𝘷𝘦𝘳𝘴𝘢𝘵𝘪𝘰𝘯𝘴 𝘪𝘯 𝘵𝘩𝘦 𝘤𝘰𝘳𝘳𝘦𝘤𝘵 𝘤𝘩𝘢𝘯𝘯𝘦𝘭𝘴. 𝘌𝘷𝘦𝘳𝘺 𝘳𝘰𝘰𝘮 𝘪𝘯 𝘵𝘩𝘦 𝘤𝘢𝘴𝘵𝘭𝘦 𝘩𝘢𝘴 𝘪𝘵𝘴 𝘱𝘶𝘳𝘱𝘰𝘴𝘦.',
+        '',
+        `***𝟕. 𝐍𝐨 𝐈𝐦𝐩𝐞𝐫𝐬𝐨𝐧𝐚𝐭𝐢𝐧𝐠 𝐑𝐨𝐲𝐚𝐥𝐬*** ${sparkle}`,
+        '𝘋𝘰 𝘯𝘰𝘵 𝘱𝘳𝘦𝘵𝘦𝘯𝘥 𝘵𝘰 𝘣𝘦 𝘴𝘵𝘢𝘧𝘧, 𝘰𝘸𝘯𝘦𝘳𝘴, 𝘰𝘳 𝘰𝘵𝘩𝘦𝘳 𝘮𝘦𝘮𝘣𝘦𝘳𝘴.',
+        '',
+        `***𝟖. 𝐊𝐞𝐞𝐩 𝐘𝐨𝐮𝐫 𝐂𝐫𝐨𝐰𝐧 𝐑𝐞𝐬𝐩𝐞𝐜𝐭𝐟𝐮𝐥*** ${sparkle}`,
+        '𝘕𝘰 𝘦𝘹𝘤𝘦𝘴𝘴𝘪𝘷𝘦 𝘴𝘸𝘦𝘢𝘳𝘪𝘯𝘨, 𝘴𝘭𝘶𝘳𝘴, 𝘰𝘳 𝘩𝘢𝘵𝘦𝘧𝘶𝘭 𝘭𝘢𝘯𝘨𝘶𝘢𝘨𝘦 𝘵𝘰𝘸𝘢𝘳𝘥𝘴 𝘰𝘵𝘩𝘦𝘳𝘴.',
+        '',
+        `***𝟗. 𝐋𝐢𝐬𝐭𝐞𝐧 𝐭𝐨 𝐭𝐡𝐞 𝐑𝐨𝐲𝐚𝐥 𝐒𝐭𝐚𝐟𝐟*** ${sparkle}`,
+        '𝘚𝘵𝘢𝘧𝘧 𝘩𝘢𝘷𝘦 𝘵𝘩𝘦 𝘧𝘪𝘯𝘢𝘭 𝘴𝘢𝘺 𝘸𝘩𝘦𝘯 𝘩𝘢𝘯𝘥𝘭𝘪𝘯𝘨 𝘴𝘪𝘵𝘶𝘢𝘵𝘪𝘰𝘯𝘴. 𝘙𝘦𝘴𝘱𝘦𝘤𝘵 𝘵𝘩𝘦𝘪𝘳 𝘤𝘩𝘰𝘪𝘤𝘦𝘴.',
+        '',
+        `***𝟏𝟎. 𝐄𝐧𝐣𝐨𝐲 𝐘𝐨𝐮𝐫 𝐒𝐭𝐚𝐲 𝐈𝐧 𝐑𝐢𝐚𝐧𝐚’𝐬 𝐂𝐚𝐬𝐭𝐥𝐞*** ${sparkle}`,
+        '𝘔𝘢𝘬𝘦 𝘯𝘦𝘸 𝘧𝘳𝘪𝘦𝘯𝘥𝘴, 𝘫𝘰𝘪𝘯 𝘪𝘯, 𝘢𝘯𝘥 𝘩𝘦𝘭𝘱 𝘬𝘦𝘦𝘱 𝘰𝘶𝘳 𝘭𝘪𝘵𝘵𝘭𝘦 𝘬𝘪𝘯𝘨𝘥𝘰𝘮 𝘧𝘶𝘯, 𝘸𝘦𝘭𝘤𝘰𝘮𝘪𝘯𝘨, 𝘢𝘯𝘥 𝘱𝘦𝘢𝘤𝘦𝘧𝘶𝘭.',
+      ].join('\n'),
+    )
+    .setThumbnail(guild.iconURL({ size: 256 }) || null)
+    .setFooter({
+      text: "By staying in Riana's Castle, you agree to follow the Royal Protocol.",
+      iconURL: guild.iconURL({ size: 128 }) || undefined,
+    })
+    .setTimestamp();
+}
 
 async function sendWelcomeMessage(member) {
   const welcomeChannel = await member.guild.channels.fetch(
@@ -110,8 +168,11 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   for (const guild of readyClient.guilds.cache.values()) {
     try {
-      await guild.commands.set([testWelcomeCommand.toJSON()]);
-      console.log(`Registered /testwelcome in ${guild.name}.`);
+      await guild.commands.set([
+        testWelcomeCommand.toJSON(),
+        rulesCommand.toJSON(),
+      ]);
+      console.log(`Registered /testwelcome and /rulesembed in ${guild.name}.`);
     } catch (error) {
       console.error(`Failed to register commands in ${guild.name}:`, error);
     }
@@ -127,9 +188,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== 'testwelcome') {
-    return;
-  }
+  if (!interaction.isChatInputCommand()) return;
 
   if (!interaction.inGuild()) {
     await interaction.reply({
@@ -139,19 +198,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  try {
-    await interaction.deferReply({ ephemeral: true });
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-    await sendWelcomeMessage(member);
-    await interaction.editReply('The test welcome message was sent successfully. ♡');
-  } catch (error) {
-    console.error('Failed to run /testwelcome:', error);
+  if (interaction.commandName === 'testwelcome') {
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      await sendWelcomeMessage(member);
+      await interaction.editReply('The test welcome message was sent successfully. ♡');
+    } catch (error) {
+      console.error('Failed to run /testwelcome:', error);
+      const message = 'I could not send the test welcome. Check the welcome channel ID and my channel permissions.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
 
-    const message = 'I could not send the test welcome. Check the welcome channel ID and my channel permissions.';
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(message).catch(() => {});
-    } else {
-      await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+  if (interaction.commandName === 'rulesembed') {
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.channel.send({
+        embeds: [buildRulesEmbed(interaction.guild)],
+        allowedMentions: { parse: [] },
+      });
+      await interaction.editReply('The Royal Protocol embed was sent successfully. 👑');
+    } catch (error) {
+      console.error('Failed to run /rulesembed:', error);
+      const message = 'I could not send the rules embed. Make sure I can send messages and embeds in this channel.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
     }
   }
 });

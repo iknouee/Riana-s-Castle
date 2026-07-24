@@ -16,6 +16,7 @@ const {
   Events,
   GatewayIntentBits,
   ModalBuilder,
+  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
@@ -232,14 +233,9 @@ async function buildQuoteCard(message, guild) {
 async function sendQuoteToChannel(interaction) {
   const quoteChannelId = (process.env.QUOTE_CHANNEL_ID || '').trim();
   if (!/^\d{17,20}$/.test(quoteChannelId)) {
-    await interaction.reply({
-      content: 'QUOTE_CHANNEL_ID is missing or invalid in Render.',
-      ephemeral: true,
-    });
+    await interaction.editReply('QUOTE_CHANNEL_ID is missing or invalid in Render.');
     return;
   }
-
-  await interaction.deferReply({ ephemeral: true });
 
   const quoteChannel = await interaction.guild.channels.fetch(quoteChannelId).catch(() => null);
   if (!quoteChannel?.isTextBased()) {
@@ -779,7 +775,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.isMessageContextMenuCommand() && interaction.commandName === 'Make Quote') {
+    // Discord interactions must be acknowledged immediately. Do this before
+    // channel fetches, avatar downloads, canvas rendering, or any validation.
     try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await sendQuoteToChannel(interaction);
     } catch (error) {
       console.error('Failed to create quote:', error);
@@ -787,7 +786,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(message).catch(() => {});
       } else {
-        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     }
     return;

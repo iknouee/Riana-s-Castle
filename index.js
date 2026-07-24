@@ -15,6 +15,8 @@ const {
   ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
@@ -71,6 +73,11 @@ const boostPerksCommand = new SlashCommandBuilder()
   .setDescription('Send the Princess Perks image embed in this channel.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+const rolesPanelCommand = new SlashCommandBuilder()
+  .setName('rolespanel')
+  .setDescription('Send the Crown Selection colour-role panel in this channel.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
 const ticketPanelCommand = new SlashCommandBuilder()
   .setName('ticketpanel')
   .setDescription('Send the Riana\'s Castle ticket panel in this channel.')
@@ -89,6 +96,87 @@ const ticketRemoveCommand = new SlashCommandBuilder()
   .addUserOption((option) =>
     option.setName('member').setDescription('Member to remove').setRequired(true),
   );
+
+
+const colorRoleDefinitions = [
+  { key: 'red', label: 'Red', emoji: '🔴', env: 'COLOR_ROLE_RED_ID', description: 'A bold royal red crown.' },
+  { key: 'orange', label: 'Orange', emoji: '🟠', env: 'COLOR_ROLE_ORANGE_ID', description: 'A warm orange crown.' },
+  { key: 'yellow', label: 'Yellow', emoji: '🟡', env: 'COLOR_ROLE_YELLOW_ID', description: 'A bright golden-yellow crown.' },
+  { key: 'green', label: 'Green', emoji: '🟢', env: 'COLOR_ROLE_GREEN_ID', description: 'A fresh emerald-green crown.' },
+  { key: 'blue', label: 'Blue', emoji: '🔵', env: 'COLOR_ROLE_BLUE_ID', description: 'A calm sapphire-blue crown.' },
+  { key: 'purple', label: 'Purple', emoji: '🟣', env: 'COLOR_ROLE_PURPLE_ID', description: 'A rich royal-purple crown.' },
+  { key: 'pink', label: 'Pink', emoji: '🩷', env: 'COLOR_ROLE_PINK_ID', description: 'A classic princess-pink crown.' },
+  { key: 'light_pink', label: 'Light Pink', emoji: '🌸', env: 'COLOR_ROLE_LIGHT_PINK_ID', description: 'A soft light-pink crown.' },
+  { key: 'white', label: 'White', emoji: '⚪', env: 'COLOR_ROLE_WHITE_ID', description: 'A clean pearl-white crown.' },
+];
+
+function getConfiguredColorRoles() {
+  return colorRoleDefinitions
+    .map((role) => ({
+      ...role,
+      roleId: (process.env[role.env] || '').trim(),
+    }))
+    .filter((role) => /^\d{17,20}$/.test(role.roleId));
+}
+
+function getMissingColorRoleVariables() {
+  return colorRoleDefinitions
+    .filter((role) => !/^\d{17,20}$/.test((process.env[role.env] || '').trim()))
+    .map((role) => role.env);
+}
+
+function buildRolesPanelEmbed(guild) {
+  return new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setAuthor({
+      name: "Riana's Castle • Crown Selection",
+      iconURL: guild.iconURL({ size: 256 }) || undefined,
+    })
+    .setTitle('♕ Choose Your Royal Crown')
+    .setDescription([
+      'Pick one colour from the menu below to decorate your name around the castle.',
+      '',
+      'Selecting a new colour automatically removes your previous colour.',
+      'You can also choose **Remove My Colour** whenever you want.',
+      '',
+      '> Only one crown colour can be worn at a time.',
+    ].join('\n'))
+    .setThumbnail(guild.iconURL({ size: 256 }) || null)
+    .setFooter({
+      text: "Riana's Castle • Your crown, your colour",
+      iconURL: guild.iconURL({ size: 128 }) || undefined,
+    });
+}
+
+function buildRolesPanelRow() {
+  const configuredRoles = getConfiguredColorRoles();
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('crown_colour_select')
+    .setPlaceholder('Choose your crown colour...')
+    .setMinValues(1)
+    .setMaxValues(1);
+
+  for (const role of configuredRoles) {
+    menu.addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel(role.label)
+        .setValue(role.key)
+        .setDescription(role.description)
+        .setEmoji(role.emoji),
+    );
+  }
+
+  menu.addOptions(
+    new StringSelectMenuOptionBuilder()
+      .setLabel('Remove My Colour')
+      .setValue('remove')
+      .setDescription('Remove your current crown colour.')
+      .setEmoji('🗑️'),
+  );
+
+  return new ActionRowBuilder().addComponents(menu);
+}
 
 const ticketTypes = {
   support: {
@@ -480,11 +568,12 @@ client.once(Events.ClientReady, async (readyClient) => {
         testWelcomeCommand.toJSON(),
         rulesCommand.toJSON(),
         boostPerksCommand.toJSON(),
+        rolesPanelCommand.toJSON(),
         ticketPanelCommand.toJSON(),
         ticketAddCommand.toJSON(),
         ticketRemoveCommand.toJSON(),
       ]);
-      console.log(`Registered welcome, rules, boost perks and ticket commands in ${guild.name}.`);
+      console.log(`Registered welcome, rules, boost perks, colour roles and ticket commands in ${guild.name}.`);
     } catch (error) {
       console.error(`Failed to register commands in ${guild.name}:`, error);
     }
@@ -616,7 +705,98 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.isStringSelectMenu() && interaction.customId === 'crown_colour_select') {
+    const configuredRoles = getConfiguredColorRoles();
+    const selected = interaction.values[0];
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    const configuredRoleIds = configuredRoles.map((role) => role.roleId);
+    const removableRoleIds = configuredRoleIds.filter((roleId) => member.roles.cache.has(roleId));
+
+    try {
+      await interaction.deferReply({ ephemeral: true });
+
+      if (removableRoleIds.length > 0) {
+        await member.roles.remove(removableRoleIds, 'Member changed their Crown Selection colour');
+      }
+
+      if (selected === 'remove') {
+        await interaction.editReply('Your crown colour has been removed. ♡');
+        return;
+      }
+
+      const selectedRole = configuredRoles.find((role) => role.key === selected);
+      if (!selectedRole) {
+        await interaction.editReply('That crown colour is not configured correctly. Please tell a staff member.');
+        return;
+      }
+
+      const guildRole = interaction.guild.roles.cache.get(selectedRole.roleId);
+      if (!guildRole) {
+        await interaction.editReply('That role could not be found. Please check its Render role ID.');
+        return;
+      }
+
+      if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        await interaction.editReply('I need the **Manage Roles** permission before I can give colour roles.');
+        return;
+      }
+
+      if (guildRole.position >= interaction.guild.members.me.roles.highest.position) {
+        await interaction.editReply('My bot role must be placed above the colour roles in the server role list.');
+        return;
+      }
+
+      await member.roles.add(guildRole, `Selected ${selectedRole.label} from Crown Selection`);
+      await interaction.editReply(`${selectedRole.emoji} Your crown colour is now **${selectedRole.label}**.`);
+    } catch (error) {
+      console.error('Failed to update crown colour role:', error);
+      const message = 'I could not update your colour role. Check that I have **Manage Roles** and that my bot role is above every colour role.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'rolespanel') {
+    const configuredRoles = getConfiguredColorRoles();
+    const missingRoles = getMissingColorRoleVariables();
+
+    if (configuredRoles.length === 0) {
+      await interaction.reply({
+        content: `No colour roles are configured. Add the Render variables listed in the included README.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    try {
+      await interaction.channel.send({
+        embeds: [buildRolesPanelEmbed(interaction.guild)],
+        components: [buildRolesPanelRow()],
+        allowedMentions: { parse: [] },
+      });
+
+      await interaction.reply({
+        content: missingRoles.length
+          ? `The Crown Selection panel was sent. Some optional colours are hidden because these variables are missing: ${missingRoles.join(', ')}`
+          : 'The Crown Selection panel was sent successfully. ♕',
+        ephemeral: true,
+      });
+    } catch (error) {
+      console.error('Failed to run /rolespanel:', error);
+      await interaction.reply({
+        content: 'I could not send the role panel. Make sure I can send messages and embeds in this channel.',
+        ephemeral: true,
+      }).catch(() => {});
+    }
+    return;
+  }
 
   if (interaction.commandName === 'ticketpanel') {
     const missing = missingTicketConfig();

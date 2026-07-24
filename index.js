@@ -3,13 +3,20 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const {
+  ActionRowBuilder,
   AttachmentBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
   Client,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
 
 const requiredEnv = [
@@ -63,6 +70,279 @@ const boostPerksCommand = new SlashCommandBuilder()
   .setName('boostperks')
   .setDescription('Send the Princess Perks image embed in this channel.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+const ticketPanelCommand = new SlashCommandBuilder()
+  .setName('ticketpanel')
+  .setDescription('Send the Riana\'s Castle ticket panel in this channel.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+const ticketAddCommand = new SlashCommandBuilder()
+  .setName('ticketadd')
+  .setDescription('Add a member to the current ticket.')
+  .addUserOption((option) =>
+    option.setName('member').setDescription('Member to add').setRequired(true),
+  );
+
+const ticketRemoveCommand = new SlashCommandBuilder()
+  .setName('ticketremove')
+  .setDescription('Remove a member from the current ticket.')
+  .addUserOption((option) =>
+    option.setName('member').setDescription('Member to remove').setRequired(true),
+  );
+
+const ticketTypes = {
+  support: {
+    label: 'General Support',
+    emoji: '💗',
+    description: 'Questions, help, or anything you need staff assistance with.',
+  },
+  report: {
+    label: 'Report a Member',
+    emoji: '🛡️',
+    description: 'Privately report rule-breaking, harassment, or unsafe behaviour.',
+  },
+  staff: {
+    label: 'Staff Support',
+    emoji: '👑',
+    description: 'Contact the Royal Staff about a private server matter.',
+  },
+};
+
+function getTicketConfig() {
+  return {
+    categoryId: process.env.TICKET_CATEGORY_ID,
+    supportRoleId: process.env.TICKET_SUPPORT_ROLE_ID,
+    logChannelId: process.env.TICKET_LOG_CHANNEL_ID,
+  };
+}
+
+function missingTicketConfig() {
+  const config = getTicketConfig();
+  return Object.entries(config)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+}
+
+function buildTicketPanelEmbed(guild) {
+  return new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setAuthor({
+      name: "Riana's Castle • Royal Support",
+      iconURL: guild.iconURL({ size: 256 }) || undefined,
+    })
+    .setTitle('୨୧ Need help inside the castle?')
+    .setDescription([
+      'Choose the option that best matches what you need and a private ticket will be created for you.',
+      '',
+      '💗 **General Support**',
+      'Questions, help, or anything you need staff assistance with.',
+      '',
+      '🛡️ **Report a Member**',
+      'Privately report rule-breaking, harassment, or unsafe behaviour.',
+      '',
+      '👑 **Staff Support**',
+      'Contact the Royal Staff about a private server matter.',
+      '',
+      '> Please do not open joke tickets or repeatedly ping staff.',
+    ].join('\n'))
+    .setThumbnail(guild.iconURL({ size: 256 }) || null)
+    .setFooter({
+      text: "Riana's Castle • Royal Ticket Desk",
+      iconURL: guild.iconURL({ size: 128 }) || undefined,
+    });
+}
+
+function buildTicketPanelRows() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket_open_support')
+        .setLabel('General Support')
+        .setEmoji('💗')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('ticket_open_report')
+        .setLabel('Report a Member')
+        .setEmoji('🛡️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('ticket_open_staff')
+        .setLabel('Staff Support')
+        .setEmoji('👑')
+        .setStyle(ButtonStyle.Success),
+    ),
+  ];
+}
+
+function parseTicketTopic(channel) {
+  const topic = channel.topic || '';
+  const owner = topic.match(/ticketOwner:(\d+)/)?.[1] || null;
+  const type = topic.match(/type:([a-z]+)/)?.[1] || 'support';
+  const claimedBy = topic.match(/claimedBy:(\d*)/)?.[1] || null;
+  return { owner, type, claimedBy };
+}
+
+function isTicketChannel(channel) {
+  return channel?.type === ChannelType.GuildText && Boolean(parseTicketTopic(channel).owner);
+}
+
+function memberIsTicketStaff(member) {
+  const supportRoleId = process.env.TICKET_SUPPORT_ROLE_ID;
+  return member.permissions.has(PermissionFlagsBits.ManageChannels)
+    || (supportRoleId && member.roles.cache.has(supportRoleId));
+}
+
+function safeChannelName(username) {
+  const clean = username.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 18);
+  return clean || 'member';
+}
+
+async function createTicket(interaction, typeKey, reason) {
+  const config = getTicketConfig();
+  const type = ticketTypes[typeKey] || ticketTypes.support;
+  const existing = interaction.guild.channels.cache.find((channel) => {
+    if (!isTicketChannel(channel)) return false;
+    return parseTicketTopic(channel).owner === interaction.user.id;
+  });
+
+  if (existing) {
+    await interaction.reply({
+      content: `You already have an open ticket: ${existing}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const channel = await interaction.guild.channels.create({
+    name: `ticket-${safeChannelName(interaction.user.username)}`,
+    type: ChannelType.GuildText,
+    parent: config.categoryId,
+    topic: `ticketOwner:${interaction.user.id}|type:${typeKey}|claimedBy:`,
+    permissionOverwrites: [
+      {
+        id: interaction.guild.roles.everyone.id,
+        deny: [PermissionFlagsBits.ViewChannel],
+      },
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+      },
+      {
+        id: config.supportRoleId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.ManageMessages,
+        ],
+      },
+      {
+        id: interaction.guild.members.me.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.ManageMessages,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+      },
+    ],
+    reason: `Ticket opened by ${interaction.user.tag}`,
+  });
+
+  const controls = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket_claim')
+      .setLabel('Claim Ticket')
+      .setEmoji('👑')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('ticket_close')
+      .setLabel('Close Ticket')
+      .setEmoji('🔒')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const embed = new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setAuthor({
+      name: "Riana's Castle • Royal Ticket",
+      iconURL: interaction.guild.iconURL({ size: 256 }) || undefined,
+    })
+    .setTitle(`${type.emoji} ${type.label}`)
+    .setDescription([
+      `Welcome ${interaction.user}. Your private ticket has been created.`,
+      '',
+      `**Reason**`,
+      reason,
+      '',
+      `A member of <@&${config.supportRoleId}> will assist you soon.`,
+      '> Please explain everything clearly and avoid repeatedly pinging staff.',
+    ].join('\n'))
+    .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
+    .setFooter({ text: `Opened by ${interaction.user.tag}` })
+    .setTimestamp();
+
+  await channel.send({
+    content: `${interaction.user} <@&${config.supportRoleId}>`,
+    embeds: [embed],
+    components: [controls],
+    allowedMentions: { users: [interaction.user.id], roles: [config.supportRoleId] },
+  });
+
+  await interaction.editReply(`Your ticket has been created: ${channel}`);
+}
+
+async function buildTranscript(channel) {
+  const fetched = await channel.messages.fetch({ limit: 100 });
+  const messages = [...fetched.values()].reverse();
+  const lines = messages.map((message) => {
+    const time = new Date(message.createdTimestamp).toISOString();
+    const attachments = [...message.attachments.values()].map((item) => item.url).join(' ');
+    return `[${time}] ${message.author.tag}: ${message.cleanContent}${attachments ? ` ${attachments}` : ''}`;
+  });
+  return Buffer.from(lines.join('\n') || 'No messages were found in this ticket.', 'utf8');
+}
+
+async function closeTicket(channel, closedBy) {
+  const config = getTicketConfig();
+  const details = parseTicketTopic(channel);
+  const transcript = await buildTranscript(channel).catch(() => Buffer.from('Transcript unavailable.', 'utf8'));
+  const logChannel = await channel.guild.channels.fetch(config.logChannelId).catch(() => null);
+
+  if (logChannel?.isTextBased()) {
+    const logEmbed = new EmbedBuilder()
+      .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+      .setTitle('🔒 Royal Ticket Closed')
+      .addFields(
+        { name: 'Ticket', value: channel.name, inline: true },
+        { name: 'Opened by', value: details.owner ? `<@${details.owner}>` : 'Unknown', inline: true },
+        { name: 'Closed by', value: `${closedBy}`, inline: true },
+        { name: 'Type', value: ticketTypes[details.type]?.label || details.type, inline: true },
+      )
+      .setTimestamp();
+
+    await logChannel.send({
+      embeds: [logEmbed],
+      files: [new AttachmentBuilder(transcript, { name: `${channel.name}-transcript.txt` })],
+      allowedMentions: { parse: [] },
+    }).catch((error) => console.error('Failed to send ticket log:', error));
+  }
+
+  await channel.delete(`Ticket closed by ${closedBy.tag || closedBy.username || closedBy.id}`);
+}
 
 const boostPerksImageUrl =
   'https://cdn.discordapp.com/attachments/1317849175760834613/1530252343629709343/ChatGPT_Image_Jul_24_2026_05_35_27_PM.png?ex=6a64e60d&is=6a63948d&hm=060bca28890422e0ea59407dab7d35c0a17f044387dd721935357fb72aab2942';
@@ -186,8 +466,11 @@ client.once(Events.ClientReady, async (readyClient) => {
         testWelcomeCommand.toJSON(),
         rulesCommand.toJSON(),
         boostPerksCommand.toJSON(),
+        ticketPanelCommand.toJSON(),
+        ticketAddCommand.toJSON(),
+        ticketRemoveCommand.toJSON(),
       ]);
-      console.log(`Registered /testwelcome, /rulesembed and /boostperks in ${guild.name}.`);
+      console.log(`Registered welcome, rules, boost perks and ticket commands in ${guild.name}.`);
     } catch (error) {
       console.error(`Failed to register commands in ${guild.name}:`, error);
     }
@@ -203,13 +486,169 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: 'This command can only be used inside the server.',
       ephemeral: true,
     });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('ticket_open_')) {
+    const missing = missingTicketConfig();
+    if (missing.length) {
+      await interaction.reply({
+        content: `Ticket setup is incomplete. Missing Render variables: ${missing.join(', ')}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const typeKey = interaction.customId.replace('ticket_open_', '');
+    const type = ticketTypes[typeKey] || ticketTypes.support;
+    const modal = new ModalBuilder()
+      .setCustomId(`ticket_modal_${typeKey}`)
+      .setTitle(type.label);
+
+    const reasonInput = new TextInputBuilder()
+      .setCustomId('ticket_reason')
+      .setLabel('How can the Royal Staff help?')
+      .setPlaceholder('Please explain the situation clearly...')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMinLength(10)
+      .setMaxLength(1000)
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
+    const typeKey = interaction.customId.replace('ticket_modal_', '');
+    const reason = interaction.fields.getTextInputValue('ticket_reason');
+    try {
+      await createTicket(interaction, typeKey, reason);
+    } catch (error) {
+      console.error('Failed to create ticket:', error);
+      const message = 'I could not create your ticket. Check my permissions and the ticket category/role IDs.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'ticket_claim') {
+    if (!isTicketChannel(interaction.channel) || !memberIsTicketStaff(interaction.member)) {
+      await interaction.reply({ content: 'Only Royal Staff can claim tickets.', ephemeral: true });
+      return;
+    }
+
+    const details = parseTicketTopic(interaction.channel);
+    if (details.claimedBy) {
+      await interaction.reply({ content: `This ticket is already claimed by <@${details.claimedBy}>.`, ephemeral: true });
+      return;
+    }
+
+    await interaction.channel.setTopic(`ticketOwner:${details.owner}|type:${details.type}|claimedBy:${interaction.user.id}`);
+    const claimedRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket_claim')
+        .setLabel(`Claimed by ${interaction.user.username}`.slice(0, 80))
+        .setEmoji('👑')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId('ticket_close')
+        .setLabel('Close Ticket')
+        .setEmoji('🔒')
+        .setStyle(ButtonStyle.Danger),
+    );
+    await interaction.update({ components: [claimedRow] });
+    await interaction.followUp({ content: `👑 ${interaction.user} has claimed this ticket.`, allowedMentions: { users: [interaction.user.id] } });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'ticket_close') {
+    if (!isTicketChannel(interaction.channel)) return;
+    const details = parseTicketTopic(interaction.channel);
+    const canClose = interaction.user.id === details.owner || memberIsTicketStaff(interaction.member);
+    if (!canClose) {
+      await interaction.reply({ content: 'Only the ticket owner or Royal Staff can close this ticket.', ephemeral: true });
+      return;
+    }
+
+    const confirmRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket_close_confirm').setLabel('Yes, close it').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket_close_cancel').setLabel('Keep Open').setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({ content: 'Are you sure you want to close this ticket?', components: [confirmRow], ephemeral: true });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'ticket_close_cancel') {
+    await interaction.update({ content: 'The ticket will stay open. ♡', components: [] });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'ticket_close_confirm') {
+    if (!isTicketChannel(interaction.channel)) return;
+    await interaction.update({ content: 'Closing this ticket and saving the transcript…', components: [] });
+    await interaction.channel.send('🔒 This ticket is now closing. A transcript will be saved for staff.');
+    setTimeout(() => closeTicket(interaction.channel, interaction.user).catch(console.error), 2500);
+    return;
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'ticketpanel') {
+    const missing = missingTicketConfig();
+    if (missing.length) {
+      await interaction.reply({
+        content: `Add these Render environment variables first: ${missing.join(', ')}`,
+        ephemeral: true,
+      });
+      return;
+    }
+    await interaction.channel.send({
+      embeds: [buildTicketPanelEmbed(interaction.guild)],
+      components: buildTicketPanelRows(),
+      allowedMentions: { parse: [] },
+    });
+    await interaction.reply({ content: 'The Royal Ticket panel was sent successfully. 👑', ephemeral: true });
+    return;
+  }
+
+  if (interaction.commandName === 'ticketadd' || interaction.commandName === 'ticketremove') {
+    if (!isTicketChannel(interaction.channel)) {
+      await interaction.reply({ content: 'This command can only be used inside a ticket.', ephemeral: true });
+      return;
+    }
+    if (!memberIsTicketStaff(interaction.member)) {
+      await interaction.reply({ content: 'Only Royal Staff can manage ticket members.', ephemeral: true });
+      return;
+    }
+    const target = interaction.options.getUser('member', true);
+    if (interaction.commandName === 'ticketadd') {
+      await interaction.channel.permissionOverwrites.edit(target.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+      });
+      await interaction.reply({ content: `💗 ${target} was added to the ticket.`, allowedMentions: { users: [target.id] } });
+    } else {
+      const details = parseTicketTopic(interaction.channel);
+      if (target.id === details.owner) {
+        await interaction.reply({ content: 'You cannot remove the ticket owner.', ephemeral: true });
+        return;
+      }
+      await interaction.channel.permissionOverwrites.delete(target.id).catch(() => {});
+      await interaction.reply({ content: `🩷 ${target.username} was removed from the ticket.` });
+    }
     return;
   }
 

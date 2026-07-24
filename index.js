@@ -8,6 +8,7 @@ const {
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  SlashCommandBuilder,
 } = require('discord.js');
 
 const requiredEnv = [
@@ -48,64 +49,110 @@ const client = new Client({
 
 const bannerPath = path.join(__dirname, 'assets', 'welcome-banner.png');
 
-client.once(Events.ClientReady, (readyClient) => {
+const testWelcomeCommand = new SlashCommandBuilder()
+  .setName('testwelcome')
+  .setDescription('Preview the Riana\'s Castle welcome message.');
+
+async function sendWelcomeMessage(member) {
+  const welcomeChannel = await member.guild.channels.fetch(
+    process.env.WELCOME_CHANNEL_ID,
+  );
+
+  if (!welcomeChannel || !welcomeChannel.isTextBased()) {
+    throw new Error('WELCOME_CHANNEL_ID is not a text channel the bot can access.');
+  }
+
+  const banner = new AttachmentBuilder(bannerPath, {
+    name: 'welcome-banner.png',
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setAuthor({
+      name: "Riana's Castle",
+      iconURL: member.guild.iconURL({ size: 256 }) || undefined,
+    })
+    .setTitle(`Welcome to Riana's Castle, ${member.user.username}! ♡`)
+    .setDescription(
+      [
+        `Welcome ${member} — you are **member #${member.guild.memberCount.toLocaleString()}**!`,
+        '',
+        'We are a friendly hangout server, so settle in, meet new people and enjoy the castle.',
+        '',
+        `> 📜 **Read first:** <#${process.env.ROYAL_LAW_CHANNEL_ID}>`,
+        `> 📣 **Stay updated:** <#${process.env.CASTLE_UPDATES_CHANNEL_ID}>`,
+        `> 💬 **Start chatting:** <#${process.env.ROYAL_LOUNGE_CHANNEL_ID}>`,
+      ].join('\n'),
+    )
+    .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+    .setImage('attachment://welcome-banner.png')
+    .setFooter({
+      text: `Riana's Castle • ${member.guild.memberCount.toLocaleString()} members`,
+      iconURL: member.guild.iconURL({ size: 128 }) || undefined,
+    })
+    .setTimestamp();
+
+  await welcomeChannel.send({
+    content: `✨ Everyone welcome ${member} to **Riana's Castle**!`,
+    embeds: [embed],
+    files: [banner],
+    allowedMentions: {
+      users: [member.id],
+      roles: [],
+      repliedUser: false,
+    },
+  });
+}
+
+client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   console.log(`Connected to ${readyClient.guilds.cache.size} server(s).`);
+
+  for (const guild of readyClient.guilds.cache.values()) {
+    try {
+      await guild.commands.set([testWelcomeCommand.toJSON()]);
+      console.log(`Registered /testwelcome in ${guild.name}.`);
+    } catch (error) {
+      console.error(`Failed to register commands in ${guild.name}:`, error);
+    }
+  }
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
   try {
-    const welcomeChannel = await member.guild.channels.fetch(
-      process.env.WELCOME_CHANNEL_ID,
-    );
-
-    if (!welcomeChannel || !welcomeChannel.isTextBased()) {
-      console.error('WELCOME_CHANNEL_ID is not a text channel the bot can access.');
-      return;
-    }
-
-    const banner = new AttachmentBuilder(bannerPath, {
-      name: 'welcome-banner.png',
-    });
-
-    const embed = new EmbedBuilder()
-      .setColor(process.env.EMBED_COLOR || '#F4B8CC')
-      .setAuthor({
-        name: "Riana's Castle",
-        iconURL: member.guild.iconURL({ size: 256 }) || undefined,
-      })
-      .setTitle(`Welcome to Riana's Castle, ${member.user.username}! ♡`)
-      .setDescription(
-        [
-          `Welcome ${member} — you are **member #${member.guild.memberCount.toLocaleString()}**!`,
-          '',
-          'We are a friendly hangout server, so settle in, meet new people and enjoy the castle.',
-          '',
-          `> 📜 **Read first:** <#${process.env.ROYAL_LAW_CHANNEL_ID}>`,
-          `> 📣 **Stay updated:** <#${process.env.CASTLE_UPDATES_CHANNEL_ID}>`,
-          `> 💬 **Start chatting:** <#${process.env.ROYAL_LOUNGE_CHANNEL_ID}>`,
-        ].join('\n'),
-      )
-      .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
-      .setImage('attachment://welcome-banner.png')
-      .setFooter({
-        text: `Riana's Castle • ${member.guild.memberCount.toLocaleString()} members`,
-        iconURL: member.guild.iconURL({ size: 128 }) || undefined,
-      })
-      .setTimestamp();
-
-    await welcomeChannel.send({
-      content: `✨ Everyone welcome ${member} to **Riana's Castle**!`,
-      embeds: [embed],
-      files: [banner],
-      allowedMentions: {
-        users: [member.id],
-        roles: [],
-        repliedUser: false,
-      },
-    });
+    await sendWelcomeMessage(member);
   } catch (error) {
     console.error('Failed to send welcome message:', error);
+  }
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== 'testwelcome') {
+    return;
+  }
+
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: 'This command can only be used inside the server.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    await sendWelcomeMessage(member);
+    await interaction.editReply('The test welcome message was sent successfully. ♡');
+  } catch (error) {
+    console.error('Failed to run /testwelcome:', error);
+
+    const message = 'I could not send the test welcome. Check the welcome channel ID and my channel permissions.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(message).catch(() => {});
+    } else {
+      await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+    }
   }
 });
 

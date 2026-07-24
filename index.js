@@ -59,6 +59,20 @@ const rulesCommand = new SlashCommandBuilder()
   .setDescription('Send the Royal Protocol rules embed in this channel.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+const boostPerksCommand = new SlashCommandBuilder()
+  .setName('boostperks')
+  .setDescription('Send the Princess Perks image embed in this channel.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+const boostPerksImageUrl =
+  'https://cdn.discordapp.com/attachments/1317849175760834613/1530252343629709343/ChatGPT_Image_Jul_24_2026_05_35_27_PM.png?ex=6a64e60d&is=6a63948d&hm=060bca28890422e0ea59407dab7d35c0a17f044387dd721935357fb72aab2942';
+
+function buildBoostPerksEmbed() {
+  return new EmbedBuilder()
+    .setColor(process.env.EMBED_COLOR || '#F4B8CC')
+    .setImage(boostPerksImageUrl);
+}
+
 function buildRulesEmbed(guild) {
   const sparkle = '<a:riascastle:1527767518973001941>';
   const titleEmoji = '<a:riascastle:1527747236988063918>';
@@ -171,8 +185,9 @@ client.once(Events.ClientReady, async (readyClient) => {
       await guild.commands.set([
         testWelcomeCommand.toJSON(),
         rulesCommand.toJSON(),
+        boostPerksCommand.toJSON(),
       ]);
-      console.log(`Registered /testwelcome and /rulesembed in ${guild.name}.`);
+      console.log(`Registered /testwelcome, /rulesembed and /boostperks in ${guild.name}.`);
     } catch (error) {
       console.error(`Failed to register commands in ${guild.name}:`, error);
     }
@@ -227,6 +242,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch (error) {
       console.error('Failed to run /rulesembed:', error);
       const message = 'I could not send the rules embed. Make sure I can send messages and embeds in this channel.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(message).catch(() => {});
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+      }
+    }
+  }
+
+
+  if (interaction.commandName === 'boostperks') {
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.channel.send({
+        embeds: [buildBoostPerksEmbed()],
+        allowedMentions: { parse: [] },
+      });
+      await interaction.editReply('The Princess Perks image embed was sent successfully. ♡');
+    } catch (error) {
+      console.error('Failed to run /boostperks:', error);
+      const message = 'I could not send the boost perks embed. Make sure I can send messages and embeds in this channel.';
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(message).catch(() => {});
       } else {
